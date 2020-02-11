@@ -4,4 +4,18 @@
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
 
+	<PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageVersion>0.1.0</PackageVersion>
+    <PackageId>Ipset.NET</PackageId>
+  	<Authors>Jonathan LEI</Authors>
+		<Description>.NET wrapper library for the Linux utility program ipset</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<RepositoryUrl>https://github.com/xJonathanLEI/Ipset.NET</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageProjectUrl>https://github.com/xJonathanLEI/Ipset.NET</PackageProjectUrl>
+  </PropertyGroup>
+
 </Project>
