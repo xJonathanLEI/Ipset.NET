@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 
 namespace Ipset
 {
@@ -19,20 +20,24 @@ namespace Ipset
 
         public static IpsetSet GetSetByName(string setName)
         {
-            var outputs = GetOutputFromCommand($"list {setName}");
+            using var outputs = GetOutputFromCommand($"list {setName}");
 
             // Errors reported?
-            if (!outputs.StandardError.EndOfStream)
+            using (var sr = new StreamReader(outputs.StandardError))
             {
-                string errorLine = outputs.StandardError.ReadLine();
+                if (!sr.EndOfStream)
+                {
+                    string errorLine = sr.ReadLine();
 
-                if (errorLine.Contains(SetDoesNotExistText))
-                    throw new IpsetSetNotFoundException(setName);
+                    if (errorLine.Contains(SetDoesNotExistText))
+                        throw new IpsetSetNotFoundException(setName);
 
-                throw new NotImplementedException($"Uknown error message: {errorLine}");
+                    throw new NotImplementedException($"Uknown error message: {errorLine}");
+                }
             }
 
-            using (var sr = outputs.StandardOutput)
+            // Reads standard output
+            using (var sr = new StreamReader(outputs.StandardOutput))
             {
                 string firstLine = sr.ReadLine();
 
@@ -101,60 +106,115 @@ namespace Ipset
 
         public static void AddMemberToSet(string setName, string member)
         {
-            var outputs = GetOutputFromCommand($"add {setName} {member}");
+            using var outputs = GetOutputFromCommand($"add {setName} {member}");
 
             // Errors reported?
-            if (!outputs.StandardError.EndOfStream)
+            using (var sr = new StreamReader(outputs.StandardError))
             {
-                string errorLine = outputs.StandardError.ReadLine();
+                if (!sr.EndOfStream)
+                {
+                    string errorLine = sr.ReadLine();
 
-                if (errorLine.Contains(SetDoesNotExistText))
-                    throw new IpsetSetNotFoundException(setName);
+                    if (errorLine.Contains(SetDoesNotExistText))
+                        throw new IpsetSetNotFoundException(setName);
 
-                if (errorLine.Contains(ElementAlreadyAddedText))
-                    throw new IpsetElementAlreadyInSetException(setName, member);
+                    if (errorLine.Contains(ElementAlreadyAddedText))
+                        throw new IpsetElementAlreadyInSetException(setName, member);
 
-                if (errorLine.Contains(ResolveIpv4AddressFailedText))
-                    throw new IpsetInvalidIpAddressException(member);
+                    if (errorLine.Contains(ResolveIpv4AddressFailedText))
+                        throw new IpsetInvalidIpAddressException(member);
 
-                throw new NotImplementedException($"Uknown error message: {errorLine}");
+                    throw new NotImplementedException($"Uknown error message: {errorLine}");
+                }
             }
         }
 
         public static void RemoveMemberFromSet(string setName, string member)
         {
-            var outputs = GetOutputFromCommand($"del {setName} {member}");
+            using var outputs = GetOutputFromCommand($"del {setName} {member}");
 
             // Errors reported?
-            if (!outputs.StandardError.EndOfStream)
+            using (var sr = new StreamReader(outputs.StandardError))
             {
-                string errorLine = outputs.StandardError.ReadLine();
+                if (!sr.EndOfStream)
+                {
+                    string errorLine = sr.ReadLine();
 
-                if (errorLine.Contains(SetDoesNotExistText))
-                    throw new IpsetSetNotFoundException(setName);
+                    if (errorLine.Contains(SetDoesNotExistText))
+                        throw new IpsetSetNotFoundException(setName);
 
-                if (errorLine.Contains(ElementNotAddedText))
-                    throw new IpsetElementNotFoundException(setName, member);
+                    if (errorLine.Contains(ElementNotAddedText))
+                        throw new IpsetElementNotFoundException(setName, member);
 
-                if (errorLine.Contains(ResolveIpv4AddressFailedText))
-                    throw new IpsetInvalidIpAddressException(member);
+                    if (errorLine.Contains(ResolveIpv4AddressFailedText))
+                        throw new IpsetInvalidIpAddressException(member);
 
-                throw new NotImplementedException($"Uknown error message: {errorLine}");
+                    throw new NotImplementedException($"Uknown error message: {errorLine}");
+                }
             }
         }
 
         private static ProcessOutputs GetOutputFromCommand(string arguments)
         {
-            var startInfo = new ProcessStartInfo("ipset", arguments);
-            startInfo.RedirectStandardOutput = true;
-            startInfo.RedirectStandardError = true;
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo("ipset", arguments)
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                },
+            };
 
-            var process = Process.Start(startInfo);
+            var standardStream = new MemoryStream();
+            var errorStream = new MemoryStream();
+
+            var standardWriter = new StreamWriter(standardStream);
+            var errorWriter = new StreamWriter(errorStream);
+
+            using EventWaitHandle outputWaitHandle = new AutoResetEvent(false);
+            using EventWaitHandle errorWaitHandle = new AutoResetEvent(false);
+
+            process.OutputDataReceived += (sender, e) =>
+            {
+                if (e.Data is null)
+                {
+                    outputWaitHandle.Set();
+                }
+                else
+                {
+                    standardWriter.WriteLine(e.Data);
+                }
+            };
+            process.ErrorDataReceived += (sender, e) =>
+            {
+                if (e.Data is null)
+                {
+                    errorWaitHandle.Set();
+                }
+                else
+                {
+                    errorWriter.WriteLine(e.Data);
+                }
+            };
+
+            process.Start();
+
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
             process.WaitForExit();
+            outputWaitHandle.WaitOne();
+            errorWaitHandle.WaitOne();
+
+            standardWriter.Flush();
+            errorWriter.Flush();
+
+            standardStream.Seek(0, SeekOrigin.Begin);
+            standardStream.Seek(0, SeekOrigin.Begin);
 
             return new ProcessOutputs(
-                process.StandardOutput,
-                process.StandardError
+                standardStream,
+                errorStream
             );
         }
 
@@ -166,15 +226,21 @@ namespace Ipset
             throw new NotImplementedException($"Unknown ipset set type: {value}");
         }
 
-        private class ProcessOutputs
+        private class ProcessOutputs : IDisposable
         {
-            public StreamReader StandardOutput { get; }
-            public StreamReader StandardError { get; }
+            public Stream StandardOutput { get; }
+            public Stream StandardError { get; }
 
-            public ProcessOutputs(StreamReader standardOutput, StreamReader standardError)
+            public ProcessOutputs(Stream standardOutput, Stream standardError)
             {
                 StandardOutput = standardOutput;
                 StandardError = standardError;
+            }
+
+            public void Dispose()
+            {
+                StandardOutput.Dispose();
+                StandardError.Dispose();
             }
         }
     }

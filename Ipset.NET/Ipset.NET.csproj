@@ -2,11 +2,12 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>8.0</LangVersion>
   </PropertyGroup>
 
 	<PropertyGroup>
     <IsPackable>true</IsPackable>
-    <PackageVersion>0.1.0</PackageVersion>
+    <PackageVersion>0.1.1</PackageVersion>
     <PackageId>Ipset.NET</PackageId>
   	<Authors>Jonathan LEI</Authors>
 		<Description>.NET wrapper library for the Linux utility program ipset</Description>
